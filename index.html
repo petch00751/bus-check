@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <title>ระบบเช็คชื่อผู้โดยสารรถทัวร์</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <h1>ระบบเช็คชื่อผู้โดยสารรถทัวร์</h1>
+
+    <div class="bus-wrapper">
+      <!-- พื้นที่แสดงแผนผังที่นั่ง -->
+      <div class="bus">
+        <div class="driver">หน้ารถ / คนขับ</div>
+
+        <div class="bus-body">
+          <div id="seatsContainer" class="seats-container">
+            <!-- ที่นั่งจะถูกสร้างด้วย JavaScript -->
+          </div>
+
+          <div class="legend">
+            <div class="legend-item">
+              <div class="legend-box"></div>
+              <span>ยังไม่เช็คชื่อ</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-box checked"></div>
+              <span>เช็คชื่อแล้ว</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- แสดงข้อมูลที่นั่งที่เลือก -->
+      <div class="info-panel">
+        <h2>ข้อมูลที่นั่ง</h2>
+
+        <div class="info-row">
+          <span class="info-label">ที่นั่งที่เลือก: </span>
+          <span id="selectedSeat" class="info-value">ยังไม่ได้เลือก</span>
+        </div>
+
+        <div class="info-row">
+          <span class="info-label">สถานะ: </span>
+          <span id="selectedStatus" class="info-value">-</span>
+        </div>
+
+        <div class="info-row">
+          <span class="info-label">จำนวนที่เช็คชื่อแล้ว: </span>
+          <span id="checkedCount" class="info-value">0</span>
+        </div>
+
+        <div class="info-row">
+          <span class="info-label">รายการที่นั่งที่ยังไม่ได้เช็ค: </span>
+          <div id="uncheckedList" class="info-list">
+            -
+          </div>
+        </div>
+
+        <div class="info-actions">
+          <button id="cancelSeat" class="btn" disabled>ยกเลิกที่นั่งนี้</button>
+          <button id="clearAll" class="btn btn-danger">ล้างการเช็คชื่อทั้งหมด</button>
+        </div>
+
+        <p class="info-hint">
+          แตะที่เก้าอี้ตามหมายเลขที่นั่งของตัวเอง เพื่อเปลี่ยนสถานะเป็น “เช็คชื่อแล้ว”
+          หากต้องการยกเลิก ให้กดปุ่ม “ยกเลิกที่นั่งนี้”
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // เปลี่ยน URL ตรงนี้ถ้า backend รันอยู่ที่ที่อื่น
+    const API_URL = 'http://localhost:3000';
+
+    const rows = 10;        // จำนวนแถว
+    const seatsPerRow = 4;  // จำนวนที่นั่งต่อแถว (ซ้าย 2 + ขวา 2)
+    const seatsContainer = document.getElementById('seatsContainer');
+
+    const selectedSeatSpan = document.getElementById('selectedSeat');
+    const selectedStatusSpan = document.getElementById('selectedStatus');
+    const checkedCountSpan = document.getElementById('checkedCount');
+    const uncheckedListDiv = document.getElementById('uncheckedList');
+    const clearAllBtn = document.getElementById('clearAll');
+    const cancelSeatBtn = document.getElementById('cancelSeat');
+
+    let seatNumber = 1;
+    let currentSelectedSeat = null; // เก็บเลขที่นั่งที่เลือกอยู่ ณ ตอนนี้
+
+    // สร้างปุ่มที่นั่งทั้งหมด
+    for (let r = 1; r <= rows; r++) {
+      const rowEl = document.createElement('div');
+      rowEl.className = 'seat-row';
+
+      const leftPair = document.createElement('div');
+      leftPair.className = 'seat-pair';
+
+      const rightPair = document.createElement('div');
+      rightPair.className = 'seat-pair';
+
+      // ฝั่งซ้าย 2 ที่นั่ง
+      for (let i = 0; i < 2; i++) {
+        const seat = createSeatButton(seatNumber);
+        leftPair.appendChild(seat);
+        seatNumber++;
+      }
+
+      const aisle = document.createElement('div');
+      aisle.className = 'aisle';
+
+      // ฝั่งขวา 2 ที่นั่ง
+      for (let i = 0; i < 2; i++) {
+        const seat = createSeatButton(seatNumber);
+        rightPair.appendChild(seat);
+        seatNumber++;
+      }
+
+      rowEl.appendChild(leftPair);
+      rowEl.appendChild(aisle);
+      rowEl.appendChild(rightPair);
+
+      seatsContainer.appendChild(rowEl);
+    }
+
+    // ฟังก์ชันสร้างปุ่มที่นั่งพร้อม event
+    function createSeatButton(number) {
+      const btn = document.createElement('button');
+      btn.className = 'seat';
+      btn.textContent = number;
+      btn.setAttribute('data-seat', number);
+
+      btn.addEventListener('click', async () => {
+        const isChecked = btn.classList.contains('checked');
+
+        // อัปเดตที่นั่งล่าสุดที่เลือก
+        selectedSeatSpan.textContent = `ที่นั่ง ${number}`;
+        currentSelectedSeat = number;
+
+        if (!isChecked) {
+          // ถ้ายังไม่เช็ค -> เช็คชื่อให้
+          btn.classList.add('checked');
+          selectedStatusSpan.textContent = 'เช็คชื่อแล้ว';
+          cancelSeatBtn.disabled = false;
+          updateCheckedSummary();
+
+          // ยิงไปอัปเดตใน backend/MongoDB
+          try {
+            await fetch(`${API_URL}/api/seats/${number}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ checked: true })
+            });
+          } catch (err) {
+            console.error('อัปเดตสถานะที่นั่งผิดพลาด:', err);
+          }
+        } else {
+          // ถ้าเช็คอยู่แล้ว -> ไม่ให้ยกเลิกด้วยการกดซ้ำ
+          selectedStatusSpan.textContent = 'เช็คชื่อแล้ว';
+          cancelSeatBtn.disabled = false;
+        }
+
+        updateCheckedSummary();
+      });
+
+      return btn;
+    }
+
+    // ฟังก์ชันอัปเดตสรุปที่นั่ง
+    // - นับจำนวนที่เช็คชื่อแล้ว
+    // - แสดง "รายการที่ยังไม่ได้เช็ค"
+    function updateCheckedSummary() {
+      const allSeats = Array.from(document.querySelectorAll('.seat')).map(btn =>
+        Number(btn.getAttribute('data-seat'))
+      );
+
+      const checkedSeats = Array.from(
+        document.querySelectorAll('.seat.checked')
+      ).map(btn => Number(btn.getAttribute('data-seat')));
+
+      // หาที่นั่งที่ยังไม่ได้เช็ค
+      const uncheckedSeats = allSeats.filter(
+        seat => !checkedSeats.includes(seat)
+      );
+
+      // จำนวนที่เช็คชื่อแล้ว
+      checkedCountSpan.textContent = checkedSeats.length;
+
+      // แสดงรายการ "ยังไม่ได้เช็ค"
+      if (uncheckedSeats.length === 0) {
+        uncheckedListDiv.textContent = '-';
+      } else {
+        uncheckedSeats.sort((a, b) => a - b);
+        uncheckedListDiv.textContent = uncheckedSeats.join(', ');
+      }
+    }
+
+    // ปุ่ม "ยกเลิกที่นั่งนี้"
+    cancelSeatBtn.addEventListener('click', async () => {
+      if (currentSelectedSeat == null) return;
+
+      const btn = document.querySelector(
+        `.seat[data-seat="${currentSelectedSeat}"]`
+      );
+      if (!btn) return;
+
+      // ยกเลิกเช็คชื่อที่นั่งนี้บนหน้าจอ
+      btn.classList.remove('checked');
+
+      selectedSeatSpan.textContent = `ที่นั่ง ${currentSelectedSeat}`;
+      selectedStatusSpan.textContent = 'ยังไม่เช็คชื่อ';
+
+      cancelSeatBtn.disabled = true;
+
+      updateCheckedSummary();
+
+      // ยิงไปอัปเดตใน backend/MongoDB
+      try {
+        await fetch(`${API_URL}/api/seats/${currentSelectedSeat}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ checked: false })
+        });
+      } catch (err) {
+        console.error('ยกเลิกสถานะที่นั่งผิดพลาด:', err);
+      }
+
+      currentSelectedSeat = null;
+    });
+
+    // ปุ่มล้างการเช็คชื่อทั้งหมด
+    clearAllBtn.addEventListener('click', async () => {
+      const allSeats = document.querySelectorAll('.seat');
+      allSeats.forEach(btn => btn.classList.remove('checked'));
+
+      selectedSeatSpan.textContent = 'ยังไม่ได้เลือก';
+      selectedStatusSpan.textContent = '-';
+      cancelSeatBtn.disabled = true;
+      currentSelectedSeat = null;
+
+      updateCheckedSummary();
+
+      // ยิงไปเคลียร์ใน backend/MongoDB
+      try {
+        await fetch(`${API_URL}/api/seats/clear`, {
+          method: 'POST'
+        });
+      } catch (err) {
+        console.error('ล้างสถานะทั้งหมดผิดพลาด:', err);
+      }
+    });
+
+    // โหลดข้อมูลจากฐานข้อมูลตอนเปิดหน้าเว็บ
+    async function loadSeatsFromServer() {
+      try {
+        const res = await fetch(`${API_URL}/api/seats`);
+        if (!res.ok) {
+          console.error('โหลดข้อมูลที่นั่งจากเซิร์ฟเวอร์ล้มเหลว', res.status);
+          return;
+        }
+        const seats = await res.json();
+
+        seats.forEach(seatDoc => {
+          const btn = document.querySelector(`.seat[data-seat="${seatDoc.seatNumber}"]`);
+          if (btn && seatDoc.checked) {
+            btn.classList.add('checked');
+          }
+        });
+
+        updateCheckedSummary();
+      } catch (err) {
+        console.error('โหลดข้อมูลที่นั่งผิดพลาด:', err);
+      }
+    }
+
+    // เรียกเมื่อโหลดหน้า
+    loadSeatsFromServer();
+  </script>
+</body>
+</html>
